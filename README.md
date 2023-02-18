@@ -1,4 +1,4 @@
-# product_sales_trends
+# Dataset Description
 *Finding trends and insights in products and sales data*
 
 REC corp LTD. is small-scaled business venture established in India. They have been selling FOUR PRODUCTS for OVER TEN YEARS .
