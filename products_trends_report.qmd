@@ -345,19 +345,16 @@ model_glmnet <- linear_reg(penalty = 0.01) %>% # penalized regression
 
 ```
 
-:::{.callout-note}
-
+::: callout-note
 ### Model Description
 
 1.  **Auto ARIMA:** This is an automated version of the ARIMA model which uses a stepwise approach to search for the best parameters for the model. It works by identifying the optimal order of differencing (d), the order of the autoregressive term (p), and the order of the moving average term (q). This model can capture both trend and seasonality in the data.
 
-```{=html}
 <!-- -->
-```
+
 1.  **Prophet:** This is a time series forecasting model developed by Facebook. It is designed to capture seasonal trends, as well as changes in trend over time, using a piecewise linear model with a flexible set of priors that can be set by the user. It also allows the inclusion of external variables that might influence the time series, such as holidays or other special events.
 
 2.  **GLMNET:** This is a regularized regression model which combines Lasso and Ridge regression, allowing for feature selection and shrinking the coefficients of the model. In this code, the model uses the day of the week, month, and date features to predict sales.
-
 :::
 
 3.  **Model calibration:** calibrating the models and calculating their predictions and residuals for the test data
