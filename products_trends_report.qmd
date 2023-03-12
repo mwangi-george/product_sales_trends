@@ -42,10 +42,8 @@ The aim of this project is to analyze the sales data of REC Corp LTD. and provid
 
 By answering these questions, I will provide valuable insights into the sales patterns and overall performance of REC Corp LTD. My analysis will also help the company make informed decisions that can improve their business outcomes.
 
-:::{.callout-tip}
-
+::: callout-tip
 The dataset used for this project can be found [here](https://github.com/mwangi-george/product_sales_trends/tree/main/data)
-
 :::
 
 ### Dataset Structure and Preparation
@@ -59,7 +57,9 @@ This data cleaning process is crucial as it ensures that our analysis is based o
 ```{r}
 #| echo: false
 # Load essential packages 
-pacman::p_load(tidyverse, lubridate, janitor, naniar)
+pacman::p_load(
+  tidyverse, lubridate, janitor, naniar, modeltime, timetk, tidymodels
+  )
 
 # alter print options
 options(scipen = 999)
@@ -149,11 +149,28 @@ sales %>%
   theme(
     plot.background = element_rect(fill = "gray92")
   )
+
+# combined sales units over time
+sales %>% 
+  mutate(
+    # create a variable(combined_sales) that sums the total sales unit for every observation
+    combined_sales = quantity_p1 + quantity_p2 + quantity_p3 + quantity_p4,
+    # derive the month variable from the date column
+    month = lubridate::month(date, label = F),
+    # derive the year variable from date column
+    year  = lubridate::year(date)
+  ) %>% 
+  timetk::plot_time_series(
+    .date_var = date, 
+    .value = combined_sales,
+    .title = "Combined Sales units over time"
+    )
+
 ```
 
 ### Insights generated
 
-After conducting an analysis of the sales data for REC Corp LTD.'s four products, I have found that there is no discernible pattern or trend in the sales for certain months, as shown in the plot above. This suggests that the sales of these products are not significantly impacted by seasonality or other factors that would cause sales to increase or decrease in specific months.
+After conducting an analysis of the sales data for REC Corp LTD.'s four products, I have found that there is no discernible pattern or trend in the sales for certain months, as shown in the two plots above. This suggests that the sales of these products are not significantly impacted by seasonality or other factors that would cause sales to increase or decrease in specific months.
 
 While it may be disappointing not to find any clear trend or pattern, this insight is still valuable to REC Corp LTD. as it highlights that their sales performance is relatively stable and not overly reliant on particular seasons or other external factors. This insight can inform the company's business strategy and help them to plan for the future more effectively.
 
@@ -251,7 +268,152 @@ DT::datatable(sales %>%
 
 Based on the analysis of the available data, the table above shows the estimated number of units that could have been sold on December 31st for each of the four products. It is important to note that due to the retail centers being closed on that day, these estimates are purely theoretical and should be taken with caution. Nonetheless, this information could be useful in forecasting sales and optimizing inventory levels in preparation for the holiday season.
 
-:::{.callout-important}
-
+::: callout-important
 Further research could be done to identify patterns in sales leading up to December 31st to better inform the above estimates.
 :::
+
+## Can we predict the sales and revenues for the year 2024 with the best possible accuracy?
+
+```{r}
+# subset sales to get id, datetime feature and value for product 1
+product_1 <- sales %>% select(date, quantity_p1)
+
+# visulize the sales of product 1 over time 
+product_1 %>% 
+  plot_time_series(
+    .date_var = date, 
+    .value = quantity_p1,
+    .title = "Product 1 Sales Over time"
+    )
+
+
+# I want to create forecast models to predict the sales for the year 2024, 
+# this means I will be forecasting for the next 23 months from the end of my time series 
+
+# Split data 
+splits <- time_series_split(
+  product_1, 
+  assess = "6 months", # split the last 6 months of the data
+  cumulative = TRUE
+  )
+
+# visualize the splits
+splits %>% 
+  tk_time_series_cv_plan() %>% # extract time series cross validation plan (cv)
+  plot_time_series_cv_plan(.date_var = date, .value = quantity_p1) # plot cv
+
+```
+
+In the code above, the time series data for `product_1` is split into training and testing sets using the **`time_series_split()`** function. The splitting is done to evaluate the accuracy of the forecast models.
+
+The **`assess`** argument in **`time_series_split()`** specifies that the last 6 months of the data will be used as the testing set. This means that the models will be trained on the first part of the time series data and evaluated on the last 6 months.
+
+The **`cumulative`** argument is set to TRUE, which means that the training data used to fit the model includes all data prior to each training set. This is useful for time series data because the model can learn from the patterns in the historical data as it progresses through the training sets. Lets now fit some forecasting models.
+
+### Modeltime Workflow
+
+The modeltime workflow is a framework for building, evaluating, and comparing multiple time series models. It allows for easy comparison of different types of models and their respective accuracy. The workflow consists of several stages:
+
+1.  **Model definition:** choosing and defining the models to be used in the analysis
+
+2.  **Model fitting:** fitting the models to the training data
+
+    This is achieved using the code below
+
+```{r}
+# create forecast models
+
+# 1. fit auto arima
+model_arima <- arima_reg() %>% 
+  set_engine("auto_arima") %>% 
+  fit(quantity_p1 ~ date, training(splits))
+
+# 2. fit prophet model
+model_prophet <- prophet_reg(seasonality_yearly = TRUE) %>% 
+  set_engine("prophet") %>% 
+  fit(quantity_p1 ~ date, training(splits))
+
+# 3. fit glmnet---machine learing model
+model_glmnet <- linear_reg(penalty = 0.01) %>% # penalized regression
+  set_engine("glmnet") %>% 
+  fit(                                        # expand features
+    quantity_p1 ~ wday(date, label = TRUE)
+                + month(date, label = TRUE)
+                + as.numeric(date),
+    training(splits)
+    )
+
+```
+
+:::{.callout-note}
+
+### Model Description
+
+1.  **Auto ARIMA:** This is an automated version of the ARIMA model which uses a stepwise approach to search for the best parameters for the model. It works by identifying the optimal order of differencing (d), the order of the autoregressive term (p), and the order of the moving average term (q). This model can capture both trend and seasonality in the data.
+
+```{=html}
+<!-- -->
+```
+1.  **Prophet:** This is a time series forecasting model developed by Facebook. It is designed to capture seasonal trends, as well as changes in trend over time, using a piecewise linear model with a flexible set of priors that can be set by the user. It also allows the inclusion of external variables that might influence the time series, such as holidays or other special events.
+
+2.  **GLMNET:** This is a regularized regression model which combines Lasso and Ridge regression, allowing for feature selection and shrinking the coefficients of the model. In this code, the model uses the day of the week, month, and date features to predict sales.
+
+:::
+
+3.  **Model calibration:** calibrating the models and calculating their predictions and residuals for the test data
+
+```{r}
+# organize models for modeltime workflow
+model_tbl <- modeltime_table(
+  model_arima,
+  model_prophet,
+  model_glmnet
+)
+
+# perform calibration (calculate predictions and residuals for the test data)
+calib_tbl <- model_tbl %>% 
+  modeltime_calibrate(testing(splits))
+
+```
+
+4.  **Model evaluation:** evaluating the accuracy of the models on the test data
+
+```{r warning=FALSE}
+# Test accuracy of our test set predictions
+calib_tbl %>% modeltime_accuracy()
+```
+
+5.  **Model selection:** selecting the best performing model or combination of models.
+
+The RMSE values for the three models are quite close, with the Arima model having the lowest RMSE, followed closely by GLMNET and prophet with the highest RMSE. This indicates that the ARIMA model performed slightly better than the other models in predicting future sales for product 1. However, it's important to note that the difference in RMSE between the three models is not very large, and it's possible that another model might perform better depending on the data and the specific business problem being addressed. It's always a good idea to consider the strengths and weaknesses of each model before selecting the best one for a particular application.
+
+6.  **Forecasting:** using the selected model(s) to forecast future data.
+
+After calibrating the models with the test set and checking their accuracy, the next stage is to use the models to make predictions for the future. In this case, the models are used to forecast the sales for Product 1 for the next 23 months beyond the end of the time series data.
+
+The **`modeltime_refit()`** function is used to refit the models on the entire dataset (training and testing sets combined) to improve their accuracy before making the forecasts. The **`modeltime_forecast()`** function is then used to generate forecasts for the next 23 months. The actual sales data for Product 1 is also provided to the function to compare the predicted sales with the actual sales.
+
+Finally, the **`plot_modeltime_forecast()`** function is used to visualize the forecasts along with the actual sales data. The resulting plot shows the predicted values for Product 1 sales over the next 23 months as well as the upper and lower bounds of the confidence interval. This information can be used to inform decision-making and planning for the future sales of Product 1.
+
+```{r}
+# visualize test set predictions 
+calib_tbl %>% modeltime_forecast(
+    new_data = testing(splits),
+    actual_data = product_1
+  ) %>% 
+  plot_modeltime_forecast()
+
+
+# forecast the future
+future_forecast_tbl <- calib_tbl %>% 
+  modeltime_refit(product_1) %>% 
+  modeltime_forecast(
+    h = "23 months",
+    actual_data = product_1
+  )
+
+# visualize future forecast
+future_forecast_tbl %>% 
+  plot_modeltime_forecast()
+
+```
